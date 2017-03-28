@@ -819,8 +819,8 @@ mkdir results
 
 cleanup_all_workers >>$OUTFILE 2>&1
 
-rm -rf var test_results.subunit
-mkdir var
+rm -rf var/* test_results.subunit
+mkdir -p var
 
 echo "Detecting server version..." | tee -a $OUTFILE
 

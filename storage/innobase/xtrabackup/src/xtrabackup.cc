@@ -349,6 +349,7 @@ my_bool opt_noversioncheck = FALSE;
 my_bool opt_no_backup_locks = FALSE;
 my_bool opt_decompress = FALSE;
 my_bool opt_remove_original = FALSE;
+my_bool opt_no_tables_compatibility_check = FALSE;
 
 static const char *binlog_info_values[] = {"off", "lockless", "on", "auto",
 					   NullS};
@@ -608,6 +609,8 @@ enum options_xtrabackup
 
   OPT_XTRA_TABLES_EXCLUDE,
   OPT_XTRA_DATABASES_EXCLUDE,
+
+  OP_XTRA_NO_TABLES_COMPATIBILITY_CHECK,
 };
 
 struct my_option xb_client_options[] =
@@ -852,6 +855,13 @@ struct my_option xb_client_options[] =
    (uchar *) &opt_noversioncheck,
    (uchar *) &opt_noversioncheck,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+
+  {"no-tables-compatibility-check", OP_XTRA_NO_TABLES_COMPATIBILITY_CHECK,
+   "This option suppresses engine compatibility warning.",
+   (uchar *) &opt_no_tables_compatibility_check,
+   (uchar *) &opt_no_tables_compatibility_check,
+   0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+
 
   {"no-backup-locks", OPT_NO_BACKUP_LOCKS, "This option controls if "
    "backup locks should be used instead of FLUSH TABLES WITH READ LOCK "
@@ -6916,6 +6926,47 @@ append_defaults_group(const char *group, const char *default_groups[],
 	ut_a(appended);
 }
 
+/**************************************************************************
+Prints a warning for every table that uses unsupported engine and
+hence will not be backed up. */
+static
+void
+xb_tables_compatibility_check()
+{
+	const char* query = "\
+SELECT                                   \
+	table_schema, table_name, engine \
+FROM                                     \
+	information_schema.tables        \
+WHERE engine NOT IN (                    \
+	'MyISAM',                        \
+	'InnoDB',                        \
+	'CSV',                           \
+	'MRG_MYISAM'                     \
+)                                        \
+AND table_schema NOT IN (                \
+	'performance_schema',            \
+	'information_schema',            \
+	'mysql'                          \
+);                                       \
+";
+
+	MYSQL_RES* result = xb_mysql_query(mysql_connection, query, true, true);
+	MYSQL_ROW row;
+	if (!result) {
+		return;
+	}
+	msg("Warning: there are some tables that use engines unsupported by "
+	    "xtrabackup and will not be backed up:\n");
+
+	ut_a(mysql_num_fields(result) == 3);
+	while ((row = mysql_fetch_row(result))) {
+		msg("Info:\t%s.%s : %s\n", row[0], row[1], row[2]);
+	}
+
+	mysql_free_result(result);
+}
+
 bool
 xb_init()
 {
@@ -6976,6 +7027,10 @@ xb_init()
 
 		if (!get_mysql_vars(mysql_connection)) {
 			return(false);
+		}
+
+		if (!opt_no_tables_compatibility_check) {
+			xb_tables_compatibility_check();
 		}
 
 		history_start_time = time(NULL);
