@@ -1,4 +1,10 @@
-start_server
+function section()
+{
+    printf "
+=====================================================================
+$*
+=====================================================================\n"
+}
 
 ########################################################################
 # Restore backup from given directory and . If given
@@ -12,15 +18,14 @@ function restore_from()
     shift 1
     stop_server
     rm -rf $mysql_datadir/*
-    extra=
-
+    local extra=
 
     if [ "$#" -ne 0 ]
     then
-        vlog "Preparing $backup_path as base of incremental backup"
+        section "Preparing $backup_path as base of incremental backup"
         extra="--apply-log-only "
     else
-        vlog "Preparing $backup_path"
+        section "Preparing $backup_path"
     fi
     run_cmd xtrabackup --prepare $extra --target-dir=$backup_path
 
@@ -30,12 +35,12 @@ function restore_from()
         shift 1
         if [ "$#" -eq 0 ]
         then
-            vlog "Last incremental $incremental_dir"
+            section "Last incremental $incremental_dir"
             extra=
         else
             extra='--apply-log-only'
         fi
-        vlog "Preparing $incremental_dir as incremental"
+        section "Preparing $incremental_dir as incremental"
         run_cmd xtrabackup --prepare $extra\
            --target-dir=$backup_path --incremental-dir=$incremental_dir
     done
@@ -51,40 +56,44 @@ function test_backup_with_custom_read_buffer()
     local backup_dest_base=$topdir/backup_${buffer_size}_base
     local backup_dest_inc=$topdir/backup_${buffer_size}_inc
 
-    vlog "$buffer_size buffer size"
-    vlog "Regular backup."
+    section "$buffer_size buffer size"
+    section "Regular backup."
     xtrabackup --backup --target-dir=$backup_dest \
-        --read_buffer_size=$buffer_size
+#        --read_buffer_size=$buffer_size
 
     mkdir $backup_dest_base
     cp -r $backup_dest/* $backup_dest_base
 
-    vlog "Restoring."
+    section "Restoring."
     restore_from $backup_dest
 
-    vlog "Verifying."
+    section "Verifying."
     verify_db_state incremental_sample
 
-    vlog "Inserting more data into table"
+    section "Inserting more data into table"
     multi_row_insert incremental_sample.test \({1000..1500},200\)
     record_db_state incremental_sample
 
-    vlog "Incremental backup."
+    section "Incremental backup."
     xtrabackup --backup \
         --incremental-basedir=$backup_dest_base \
         --target-dir=$backup_dest_inc
 
-    vlog "Restoring incremental."
+    section "Restoring incremental."
     restore_from $backup_dest $backup_dest_inc
 
-    vlog "Verifying incremental."
+    section "Verifying incremental."
     verify_db_state incremental_sample
+
+    vlog "Done."
 }
 
-load_dbase_schema incremental_sample
-multi_row_insert incremental_sample.test \({1..1000},100\)
+start_server
 
-vlog "Creating a MyISAM-powered clone of the incremental_sample.test"
+load_dbase_schema incremental_sample
+multi_row_insert incremental_sample.test \({1..999},100\)
+
+section "Creating a MyISAM-powered clone of the incremental_sample.test"
 mysql -e "show create table incremental_sample.test;" \
     | tail -n +2 \
     | sed -r 's/test\s+CREATE TABLE `test`/CREATE TABLE `test_MyISAM`/' \
@@ -100,7 +109,10 @@ record_db_state incremental_sample
 
 test_backup_with_custom_read_buffer 1Kb
 
-vlog "Reverting table to original state"
+section "Reverting server to original state"
+
+#mysql incremental_sample -e "TRUNCATE test; TRUNCATE test_MyISAM;"
+#restore_db_state incremental_sample
 mysql -e "delete from incremental_sample.test where a >= 1000"
 
 test_backup_with_custom_read_buffer 50Mb

@@ -632,6 +632,11 @@ function verify_db_state()
     diff -u "$topdir/tmp/$1_old.sql" "$topdir/tmp/$1_new.sql"
 }
 
+function restore_db_state()
+{
+    mysql $1 < $topdir/tmp/$1_old.sql
+}
+
 ########################################################################
 # Workarounds for a bug in grep 2.10 when grep -q file > file would
 # result in a failure.
